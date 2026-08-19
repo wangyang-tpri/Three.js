@@ -1,17 +1,10 @@
 <script setup lang="ts">
-defineProps<{
-  msg: string
-}>()
+
 </script>
 
 <template>
-  <div class="greetings">
-    <h1 class="green">{{ msg }}</h1>
-    <h3>
-      You’ve successfully created a project with
-      <a href="https://vite.dev/" target="_blank" rel="noopener">Vite</a> +
-      <a href="https://vuejs.org/" target="_blank" rel="noopener">Vue 3</a>.
-    </h3>
+  <div class="greetings p-4">
+    <n-button type="primary">使用全新UI组件库</n-button>
   </div>
 </template>
 
