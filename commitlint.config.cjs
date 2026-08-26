@@ -10,7 +10,7 @@ module.exports = {
     // 禁止描述末尾带句号
     'subject-full-stop': [0, 'never'],
     // scope 可选、允许为空
-    'scope-empty': [0, 'always']
+    'scope-empty': [0, 'always'],
   },
   // czg 中文交互弹窗配置
   prompt: {
@@ -25,7 +25,7 @@ module.exports = {
       footerPrefixsSelect: '选择关联issue类型：',
       customFooterPrefixs: '自定义issue前缀：',
       footer: '填写关联issue编号，例如 #123：',
-      confirmCommit: '确认提交以上内容？'
+      confirmCommit: '确认提交以上内容？',
     },
     types: [
       { value: 'feat', name: 'feat:     ✨ 新增功能' },
@@ -38,7 +38,7 @@ module.exports = {
       { value: 'build', name: 'build:    🔨 构建、依赖、打包变更' },
       { value: 'ci', name: 'ci:       🎡 CI流水线配置改动' },
       { value: 'chore', name: 'chore:    🧹 工程配置、工具杂项修改' },
-      { value: 'revert', name: 'revert:   ⏪ 回滚某次提交' }
+      { value: 'revert', name: 'revert:   ⏪ 回滚某次提交' },
     ],
     useEmoji: true,
     emojiAlign: 'left',
@@ -49,6 +49,6 @@ module.exports = {
     scopeOverrides: null,
     defaultScope: '',
     // 跳过issue关联提问，如需关联issue删除该行
-    skipQuestions: ['footerPrefixsSelect', 'footer']
-  }
-}
+    skipQuestions: ['footerPrefixsSelect', 'footer'],
+  },
+};
