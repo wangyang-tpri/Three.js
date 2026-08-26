@@ -1,0 +1,22 @@
+{
+  // 保存自动格式化（prettier处理样式）
+  "editor.formatOnSave": true,
+  // 保存自动执行eslint可修复问题（unused变量等逻辑修复）
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  // 重点：单独指定vue文件默认格式化器为prettier
+  "[vue]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  // 让eslint识别vue文件
+  "eslint.validate": ["javascript", "typescript", "vue"],
+  // 允许prettier识别vue文件
+  "prettier.documentSelectors": ["**/*.vue"]
+}
