@@ -13,7 +13,7 @@
         :collapsed-icon-size="22"
         :options="menuOptions"
         :value="activeKey"
-        :default-expanded-keys="['group-basic', 'group-advanced']"
+        :default-expanded-keys="['group-basic', 'group-advanced', 'group-app']"
         @update:value="handleMenuSelect"
       />
     </n-layout-sider>
@@ -32,7 +32,9 @@ import {
   CloudDownloadOutline as ModelIcon,
   CubeOutline as CubeIcon,
   DesktopOutline as DesktopIcon,
+  HomeOutline as CadIcon,
   LayersOutline as BasicIcon,
+  MapOutline as MallIcon,
   RocketOutline as AdvancedIcon,
   ShapesOutline as ShapesIcon,
 } from '@vicons/ionicons5'
@@ -69,7 +71,10 @@ const menuOptions: MenuOption[] = [
     label: '应用',
     key: 'group-app',
     icon: renderIcon(AppIcon),
-    children: [],
+    children: [
+      { label: 'cad户型图', key: 'cad-floor-plan', icon: renderIcon(CadIcon) },
+      { label: '商场三维导航', key: 'mall-navigation', icon: renderIcon(MallIcon) },
+    ],
   },
 ]
 
