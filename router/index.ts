@@ -3,6 +3,7 @@ import Scene from '@/components/Project/Scene/index.vue'
 import Camera from '@/components/Project/Camera/index.vue'
 import Renderer from '@/components/Project/Renderer/index.vue'
 import Geometry from '@/components/Project/Geometry/index.vue'
+import ModelLoader from '@/components/Project/ModelLoader/index.vue'
 
 const routes = [
   {
@@ -28,6 +29,11 @@ const routes = [
     path: '/geometry',
     name: 'geometry',
     component: Geometry,
+  },
+  {
+    path: '/model-load',
+    name: 'model-load',
+    component: ModelLoader,
   },
 ]
 export default createRouter({

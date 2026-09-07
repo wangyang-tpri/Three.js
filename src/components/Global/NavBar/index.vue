@@ -13,7 +13,7 @@
         :collapsed-icon-size="22"
         :options="menuOptions"
         :value="activeKey"
-        :default-expanded-keys="['group-basic']"
+        :default-expanded-keys="['group-basic', 'group-advanced']"
         @update:value="handleMenuSelect"
       />
     </n-layout-sider>
@@ -24,26 +24,27 @@
 </template>
 
 <script setup lang="ts">
-import type { MenuOption } from 'naive-ui';
-import type { Component } from 'vue';
+import type { MenuOption } from 'naive-ui'
+import type { Component } from 'vue'
 import {
   AppsOutline as AppIcon,
   CameraOutline as CameraIcon,
+  CloudDownloadOutline as ModelIcon,
   CubeOutline as CubeIcon,
   DesktopOutline as DesktopIcon,
   LayersOutline as BasicIcon,
   RocketOutline as AdvancedIcon,
   ShapesOutline as ShapesIcon,
-} from '@vicons/ionicons5';
-import { NIcon } from 'naive-ui';
-import { computed, h, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+} from '@vicons/ionicons5'
+import { NIcon } from 'naive-ui'
+import { computed, h, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 function renderIcon(icon: Component) {
-  return () => h(NIcon, null, { default: () => h(icon) });
+  return () => h(NIcon, null, { default: () => h(icon) })
 }
 
-// 一级目录：基础 / 进阶 / 应用；基础下挂已实现的 4 个教学页
+// 一级目录：基础 / 进阶 / 应用
 const menuOptions: MenuOption[] = [
   {
     label: '基础',
@@ -60,7 +61,9 @@ const menuOptions: MenuOption[] = [
     label: '进阶',
     key: 'group-advanced',
     icon: renderIcon(AdvancedIcon),
-    children: [],
+    children: [
+      { label: '模型加载', key: 'model-load', icon: renderIcon(ModelIcon) },
+    ],
   },
   {
     label: '应用',
@@ -68,18 +71,18 @@ const menuOptions: MenuOption[] = [
     icon: renderIcon(AppIcon),
     children: [],
   },
-];
+]
 
-const inverted = ref(false);
+const inverted = ref(false)
 
-const router = useRouter();
-const route = useRoute();
+const router = useRouter()
+const route = useRoute()
 
 // 根据当前路由高亮选中的菜单项
-const activeKey = computed(() => String(route.name ?? ''));
+const activeKey = computed(() => String(route.name ?? ''))
 
 // 点击菜单跳转对应路由（仅当存在对应路由时跳转，目录项不跳转）
 function handleMenuSelect(key: string) {
-  if (router.hasRoute(key)) router.push({ name: key });
+  if (router.hasRoute(key)) router.push({ name: key })
 }
 </script>
