@@ -1,17 +1,11 @@
 <script setup lang="ts">
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { highlightCode } from '../../../utils/codeHighlight';
+import { computed, onMounted, ref } from 'vue';
+import { useThreeScene } from '@/hooks/useThreeScene';
+import { useCodeExplain } from '@/hooks/useCodeExplain';
+import CodePanel from '@/components/base/CodePanel.vue';
 
-/* ================= 状态 ================= */
 const containerRef = ref<HTMLDivElement | null>(null);
-
-let renderer: THREE.WebGLRenderer | null = null;
-let scene: THREE.Scene | null = null;
-let camera: THREE.PerspectiveCamera | THREE.OrthographicCamera | null = null;
-let controls: OrbitControls | null = null;
-let resizeObserver: ResizeObserver | null = null;
 
 // 演示场景里的辅助物体（用于裁剪/透视对比）
 let farBall: THREE.Mesh | null = null;
@@ -28,7 +22,6 @@ let anim: {
   t: number;
   duration: number;
 } | null = null;
-let lastTime = 0;
 
 // 各功能子状态
 const activeFeature = ref('perspective'); // 当前展示的功能
@@ -46,6 +39,38 @@ const POS_SETUPS = [
 ];
 const CLIP_LABELS = ['正常 near 0.1 / far 100', 'far=6.5（远处球被裁）', 'near=4（近处方块被裁）'];
 
+const { scene, camera, renderer, controls } = useThreeScene(containerRef, {
+  background: 0xf5f7fa,
+  camera: { fov: 50, near: 0.1, far: 100, position: [3, 2, 5], lookAt: [0, 0.5, 0] },
+  controls: { target: [0, 0.5, 0] },
+  grid: { size: 12, divisions: 12, color1: 0xbfc6d4, color2: 0xe2e6ee },
+  axes: 2,
+  lights: { ambient: 0.6, directional: 1, dirPosition: [5, 10, 7] },
+  animate: (delta) => {
+    const cam = camera.value;
+    const ctl = controls.value;
+    if (!anim || !cam || !ctl) return;
+    anim.t += delta;
+    const k = easeInOutCubic(Math.min(anim.t / anim.duration, 1));
+    cam.position.lerpVectors(anim.startPos, anim.endPos, k);
+    ctl.target.lerpVectors(anim.startTarget, anim.endTarget, k);
+    if (cam instanceof THREE.PerspectiveCamera) {
+      cam.fov = lerp(anim.startFov, anim.endFov, k);
+      cam.updateProjectionMatrix();
+    }
+    ctl.update();
+    if (anim.t >= anim.duration) {
+      anim = null;
+      ctl.enabled = true;
+    }
+  },
+  onDispose: () => {
+    anim = null;
+    farBall = null;
+    cube = null;
+  },
+});
+
 /* ================= 工具函数 ================= */
 function easeInOutCubic(t: number) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -61,12 +86,14 @@ function animateCameraTo(opts: {
   fov?: number;
   duration?: number;
 }) {
-  if (!camera || !controls) return;
+  const cam = camera.value;
+  const ctl = controls.value;
+  if (!cam || !ctl) return;
   const duration = opts.duration ?? 900;
-  const startPos = camera.position.clone();
-  const startTarget = controls.target.clone();
+  const startPos = cam.position.clone();
+  const startTarget = ctl.target.clone();
   const startFov =
-    camera instanceof THREE.PerspectiveCamera ? camera.fov : (FOV_VALUES[fovIndex.value] ?? 50);
+    cam instanceof THREE.PerspectiveCamera ? cam.fov : (FOV_VALUES[fovIndex.value] ?? 50);
   anim = {
     startPos,
     endPos: new THREE.Vector3(...(opts.pos ?? [startPos.x, startPos.y, startPos.z])),
@@ -77,47 +104,13 @@ function animateCameraTo(opts: {
     t: 0,
     duration,
   };
-  if (controls) controls.enabled = false; // 动画期间禁用手动拖拽
+  ctl.enabled = false; // 动画期间禁用手动拖拽
 }
 
-/* ================= 场景初始化 ================= */
-function initScene() {
-  const container = containerRef.value;
-  if (!container || container.clientWidth === 0 || container.clientHeight === 0) return;
-
-  // 场景
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xf5f7fa);
-
-  // 相机：默认透视 50°
-  camera = new THREE.PerspectiveCamera(
-    50,
-    container.clientWidth / container.clientHeight,
-    0.1,
-    100
-  );
-  camera.position.set(3, 2, 5);
-  camera.lookAt(0, 0.5, 0);
-
-  // 渲染器
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(container.clientWidth, container.clientHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  container.appendChild(renderer.domElement);
-
-  // 轨道控制器（保留鼠标交互，便于自由观察）
-  controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.target.set(0, 0.5, 0);
-  controls.update();
-
-  // ---- 场景内容：便于对比相机特性 ----
-  // 地面网格
-  const grid = new THREE.GridHelper(12, 12, 0xbfc6d4, 0xe2e6ee);
-  scene.add(grid);
-  // 坐标轴
-  const axes = new THREE.AxesHelper(2);
-  scene.add(axes);
+/* ================= 场景内容（hook 已初始化场景，此处添加演示物体） ================= */
+onMounted(() => {
+  const s = scene.value;
+  if (!s) return;
 
   // 中央立方体（近处）
   cube = new THREE.Mesh(
@@ -125,7 +118,7 @@ function initScene() {
     new THREE.MeshStandardMaterial({ color: 0x4a9eff })
   );
   cube.position.y = 0.5;
-  scene.add(cube);
+  s.add(cube);
 
   // 远处的橙色球（距离相机约 8.6，用于 far 裁剪演示）
   farBall = new THREE.Mesh(
@@ -133,7 +126,7 @@ function initScene() {
     new THREE.MeshStandardMaterial({ color: 0xff9f43 })
   );
   farBall.position.set(0, 1.5, -3);
-  scene.add(farBall);
+  s.add(farBall);
 
   // 近处绿色小方块（距离相机约 3.1，用于 near 裁剪演示）
   const nearBox = new THREE.Mesh(
@@ -141,61 +134,8 @@ function initScene() {
     new THREE.MeshStandardMaterial({ color: 0x2ed573 })
   );
   nearBox.position.set(1.5, 1, 2.5);
-  scene.add(nearBox);
-
-  // 灯光
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const dir = new THREE.DirectionalLight(0xffffff, 1);
-  dir.position.set(5, 10, 7);
-  scene.add(dir);
-
-  // 渲染循环
-  renderer.setAnimationLoop((time: number) => {
-    const delta = lastTime ? (time - lastTime) / 1000 : 0;
-    lastTime = time;
-
-    // 相机动画插值
-    if (anim && camera && controls) {
-      anim.t += delta;
-      const k = easeInOutCubic(Math.min(anim.t / anim.duration, 1));
-      camera.position.lerpVectors(anim.startPos, anim.endPos, k);
-      controls.target.lerpVectors(anim.startTarget, anim.endTarget, k);
-      if (camera instanceof THREE.PerspectiveCamera) {
-        camera.fov = lerp(anim.startFov, anim.endFov, k);
-        camera.updateProjectionMatrix();
-      }
-      controls.update();
-      if (anim.t >= anim.duration) {
-        anim = null;
-        if (controls) controls.enabled = true;
-      }
-    }
-
-    controls?.update();
-    renderer?.render(scene!, camera!);
-  });
-
-  // 窗口尺寸同步
-  resizeObserver = new ResizeObserver(() => {
-    if (!container || !camera || !renderer) return;
-    const w = container.clientWidth;
-    const h = container.clientHeight;
-    if (w === 0 || h === 0) return;
-    if (camera instanceof THREE.PerspectiveCamera) {
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-    } else if (camera instanceof THREE.OrthographicCamera) {
-      const aspect = w / h;
-      camera.left = (-3 * aspect) / 2;
-      camera.right = (3 * aspect) / 2;
-      camera.top = 1.5;
-      camera.bottom = -1.5;
-      camera.updateProjectionMatrix();
-    }
-    renderer.setSize(w, h);
-  });
-  resizeObserver.observe(container);
-}
+  s.add(nearBox);
+});
 
 /* ================= 各功能按钮的 apply ================= */
 
@@ -206,20 +146,24 @@ function applyPerspective() {
   clipIndex.value = 0;
   rotateOn.value = false;
   activeFeature.value = 'perspective';
-  if (controls) controls.autoRotate = false; // 关闭自动环绕，避免场景持续自转
+  const ctl = controls.value;
+  if (ctl) ctl.autoRotate = false; // 关闭自动环绕，避免场景持续自转
   switchToPerspective(true);
 }
 
 function switchToPerspective(animate = true) {
-  if (!camera || !controls || !scene || !renderer) return;
+  const cam = camera.value;
+  const ctl = controls.value;
+  const rdr = renderer.value;
+  if (!cam || !ctl || !rdr) return;
   const aspect =
-    camera instanceof THREE.PerspectiveCamera
-      ? camera.aspect
-      : (renderer.domElement.clientWidth || 1) / (renderer.domElement.clientHeight || 1);
+    cam instanceof THREE.PerspectiveCamera
+      ? cam.aspect
+      : (rdr.domElement.clientWidth || 1) / (rdr.domElement.clientHeight || 1);
   const newCam = new THREE.PerspectiveCamera(FOV_VALUES[fovIndex.value], aspect, 0.1, 100);
-  newCam.position.copy(camera.position);
-  controls.object = newCam;
-  camera = newCam;
+  newCam.position.copy(cam.position);
+  ctl.object = newCam;
+  camera.value = newCam;
   if (animate) {
     animateCameraTo({
       pos: [3, 2, 5],
@@ -232,8 +176,11 @@ function switchToPerspective(animate = true) {
 // 2. 正交相机
 function applyOrthographic() {
   activeFeature.value = 'orthographic';
-  if (!camera || !controls || !scene || !renderer) return;
-  const aspect = (renderer.domElement.clientWidth || 1) / (renderer.domElement.clientHeight || 1);
+  const cam = camera.value;
+  const ctl = controls.value;
+  const rdr = renderer.value;
+  if (!cam || !ctl || !rdr) return;
+  const aspect = (rdr.domElement.clientWidth || 1) / (rdr.domElement.clientHeight || 1);
   const newCam = new THREE.OrthographicCamera(
     (-3 * aspect) / 2,
     (3 * aspect) / 2,
@@ -242,12 +189,12 @@ function applyOrthographic() {
     0.1,
     100
   );
-  newCam.position.copy(camera.position);
-  newCam.lookAt(controls.target);
-  controls.object = newCam;
-  camera = newCam;
+  newCam.position.copy(cam.position);
+  newCam.lookAt(ctl.target);
+  ctl.object = newCam;
+  camera.value = newCam;
   anim = null; // 中断可能存在的透视动画
-  if (controls) controls.enabled = true;
+  ctl.enabled = true;
 }
 
 // 3. 相机位置（循环切换视角）
@@ -258,7 +205,7 @@ function applyPosition() {
   animateCameraTo({
     pos: s.pos as [number, number, number],
     target: [0, 0.5, 0],
-    fov: camera instanceof THREE.PerspectiveCamera ? FOV_VALUES[fovIndex.value] : undefined,
+    fov: camera.value instanceof THREE.PerspectiveCamera ? FOV_VALUES[fovIndex.value] : undefined,
   });
 }
 
@@ -267,7 +214,7 @@ function applyFov() {
   fovIndex.value = (fovIndex.value + 1) % FOV_VALUES.length;
   activeFeature.value = 'fov';
   // 确保是透视相机
-  if (!(camera instanceof THREE.PerspectiveCamera)) {
+  if (!(camera.value instanceof THREE.PerspectiveCamera)) {
     switchToPerspective(false);
   }
   animateCameraTo({ fov: FOV_VALUES[fovIndex.value] });
@@ -277,29 +224,31 @@ function applyFov() {
 function applyClip() {
   clipIndex.value = (clipIndex.value + 1) % CLIP_LABELS.length;
   activeFeature.value = 'clip';
-  if (!camera) return;
+  const cam = camera.value;
+  if (!cam) return;
   switch (clipIndex.value) {
     case 0: // 正常
-      camera.near = 0.1;
-      camera.far = 100;
+      cam.near = 0.1;
+      cam.far = 100;
       break;
     case 1: // far = 6.5：远球(≈8.6)被裁，近处保留
-      camera.near = 0.1;
-      camera.far = 6.5;
+      cam.near = 0.1;
+      cam.far = 6.5;
       break;
     case 2: // near = 4：近方块(≈3.1)被裁
-      camera.near = 4;
-      camera.far = 100;
+      cam.near = 4;
+      cam.far = 100;
       break;
   }
-  camera.updateProjectionMatrix();
+  cam.updateProjectionMatrix();
 }
 
 // 6. 环绕旋转（开关）
 function applyRotate() {
   rotateOn.value = !rotateOn.value;
   activeFeature.value = 'rotate';
-  if (controls) controls.autoRotate = rotateOn.value;
+  const ctl = controls.value;
+  if (ctl) ctl.autoRotate = rotateOn.value;
 }
 
 // 重置
@@ -309,7 +258,8 @@ function applyReset() {
   clipIndex.value = 0;
   rotateOn.value = false;
   activeFeature.value = 'perspective';
-  if (controls) controls.autoRotate = false;
+  const ctl = controls.value;
+  if (ctl) ctl.autoRotate = false;
   switchToPerspective(true);
 }
 
@@ -431,28 +381,7 @@ const posLabel = computed(() => POS_SETUPS[posIndex.value]!.label);
 const fovLabel = computed(() => FOV_LABELS[fovIndex.value]!);
 const clipLabel = computed(() => CLIP_LABELS[clipIndex.value]!);
 
-const code = computed(() => {
-  const fn = codeMap[activeFeature.value];
-  return fn ? highlightCode(fn()) : '';
-});
-const explanation = computed(() => explainMap[activeFeature.value]?.() ?? '');
-
-/* ================= 生命周期 ================= */
-onMounted(initScene);
-onBeforeUnmount(() => {
-  anim = null;
-  resizeObserver?.disconnect();
-  resizeObserver = null;
-  controls?.dispose();
-  controls = null;
-  renderer?.setAnimationLoop(null);
-  renderer?.dispose();
-  renderer?.domElement.remove();
-  scene = null;
-  camera = null;
-  farBall = null;
-  cube = null;
-});
+const { code, explanation } = useCodeExplain(codeMap, explainMap, activeFeature);
 </script>
 
 <template>
@@ -505,48 +434,7 @@ onBeforeUnmount(() => {
         class="relative min-w-0 flex-1 overflow-hidden rounded-lg border border-gray-200 shadow-sm"
       ></div>
 
-      <div
-        class="flex w-[420px] shrink-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
-      >
-        <div
-          class="border-b border-l-[3px] border-l-solid border-l-green-500 border-gray-100 py-2 pl-3 pr-4 text-sm font-semibold text-gray-600"
-        >
-          {{ activeFeature }} · 示例代码
-        </div>
-        <pre
-          class="m-0 flex-1 overflow-auto bg-gray-50 p-4 text-[13px] leading-relaxed"
-        ><code v-html="code"></code></pre>
-        <div
-          class="max-h-[46%] overflow-auto border-t border-gray-100 px-4 py-3 text-[13px] leading-relaxed text-gray-600"
-        >
-          <div class="mb-1 text-xs font-semibold text-gray-400">原理讲解</div>
-          <div v-html="explanation" class="whitespace-pre-wrap"></div>
-        </div>
-      </div>
+      <CodePanel :title="activeFeature" :code="code" :explanation="explanation" />
     </div>
   </div>
 </template>
-
-<style scoped>
-:deep(.c-code-comment) {
-  color: #9ca3af;
-  font-style: italic;
-}
-:deep(.c-code-string) {
-  color: #d97706;
-}
-:deep(.c-code-num) {
-  color: #2563eb;
-}
-:deep(.c-code-keyword) {
-  color: #7c3aed;
-  font-weight: 600;
-}
-:deep(.c-code-class) {
-  color: #0891b2;
-}
-:deep(.c-code-camera) {
-  color: #db2777;
-  font-weight: 600;
-}
-</style>

@@ -1,12 +1,11 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
-import Scene from '@/components/Project/Scene/index.vue'
-import Camera from '@/components/Project/Camera/index.vue'
-import Renderer from '@/components/Project/Renderer/index.vue'
-import Geometry from '@/components/Project/Geometry/index.vue'
-import ModelLoader from '@/components/Project/ModelLoader/index.vue'
-import CadFloorPlan from '@/components/Project/CadFloorPlan/index.vue'
-import MallNavigation from '@/components/Project/MallNavigation/index.vue'
-
+import { createRouter, createWebHashHistory } from 'vue-router';
+import Scene from '@/views/business/basics/Scene/index.vue';
+import Camera from '@/views/business/basics/Camera/index.vue';
+import Renderer from '@/views/business/basics/Renderer/index.vue';
+import Geometry from '@/views/business/basics/Geometry/index.vue';
+import ModelLoader from '@/views/business/forward/ModelLoader/index.vue';
+import CadFloorPlan from '@/views/business/application/CadFloorPlan/index.vue';
+import MallNavigation from '@/views/business/application/MallNavigation/index.vue';
 const routes = [
   {
     path: '/',
@@ -47,8 +46,8 @@ const routes = [
     name: 'mall-navigation',
     component: MallNavigation,
   },
-]
+];
 export default createRouter({
   history: createWebHashHistory(),
-  routes
-})
+  routes,
+});

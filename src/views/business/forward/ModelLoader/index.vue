@@ -1,23 +1,18 @@
 <script setup lang="ts">
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { highlightCode } from '../../../utils/codeHighlight';
+import { onMounted, ref } from 'vue';
+import { useThreeScene } from '@/hooks/useThreeScene';
+import { useCodeExplain } from '@/hooks/useCodeExplain';
+import CodePanel from '@/components/base/CodePanel.vue';
 
 const containerRef = ref<HTMLDivElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 
-let renderer: THREE.WebGLRenderer | null = null;
-let scene: THREE.Scene | null = null;
-let camera: THREE.PerspectiveCamera | null = null;
-let controls: OrbitControls | null = null;
-let resizeObserver: ResizeObserver | null = null;
 let modelRoot: THREE.Object3D | null = null;
 let mixer: THREE.AnimationMixer | null = null;
-let lastTime = 0;
 
 type ModelType = 'glb' | 'gltf' | 'fbx' | 'draco';
 type Feature = ModelType | 'upload';
@@ -35,6 +30,23 @@ const modelInfo = ref<{
   ms: number;
 } | null>(null);
 
+const { scene } = useThreeScene(containerRef, {
+  background: 0xf5f7fa,
+  camera: { fov: 55, near: 0.1, far: 1000, position: [3, 2.5, 5], lookAt: [0, 1, 0] },
+  controls: { target: [0, 1, 0] },
+  grid: { size: 8, divisions: 16 },
+  axes: 3,
+  lights: { ambient: 0.7, directional: 1.2, dirPosition: [5, 10, 7] },
+  shadow: { enabled: true, mapSize: 1024, cameraBounds: 10 },
+  animate: (delta) => {
+    mixer?.update(delta);
+  },
+  onDispose: () => {
+    modelRoot = null;
+    mixer = null;
+  },
+});
+
 /* ================= 模型资源（位于 public/Model 目录） ================= */
 const MODEL_URLS: Record<ModelType, { label: string; url: string }> = {
   glb: { label: 'GLB 模型', url: '/Model/glb/Soldier.glb' },
@@ -42,64 +54,6 @@ const MODEL_URLS: Record<ModelType, { label: string; url: string }> = {
   fbx: { label: 'FBX 模型', url: '/Model/fbx/Samba Dancing.fbx' },
   draco: { label: 'Draco 压缩', url: '/Model/draco/LittlestTokyo.glb' },
 };
-
-/* ================= 场景初始化 ================= */
-function initScene() {
-  const container = containerRef.value;
-  if (!container || container.clientWidth === 0 || container.clientHeight === 0) return;
-
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xf5f7fa);
-
-  camera = new THREE.PerspectiveCamera(
-    55,
-    container.clientWidth / container.clientHeight,
-    0.1,
-    1000
-  );
-  camera.position.set(3, 2.5, 5);
-  camera.lookAt(0, 1, 0);
-
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(container.clientWidth, container.clientHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
-  container.appendChild(renderer.domElement);
-
-  controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.target.set(0, 1, 0);
-  controls.update();
-
-  const grid = new THREE.GridHelper(8, 16, 0xcbd5e1, 0xe2e8f0);
-  scene.add(grid);
-  scene.add(new THREE.AxesHelper(3));
-
-  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
-  dir.position.set(5, 10, 7);
-  dir.castShadow = true;
-  scene.add(dir);
-
-  renderer.setAnimationLoop((time: number) => {
-    const delta = lastTime ? (time - lastTime) / 1000 : 0;
-    lastTime = time;
-    mixer?.update(delta);
-    controls?.update();
-    renderer?.render(scene!, camera!);
-  });
-
-  resizeObserver = new ResizeObserver(() => {
-    if (!container || !camera || !renderer) return;
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-    if (width === 0 || height === 0) return;
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
-    renderer.setSize(width, height);
-  });
-  resizeObserver.observe(container);
-}
 
 /* ================= 模型适配：包围盒缩放 + 居中 + 贴地 ================= */
 function fitModel(obj: THREE.Object3D) {
@@ -138,7 +92,7 @@ function collectInfo(root: THREE.Object3D, name: string, ms: number) {
 /* ================= 加载完成统一处理 ================= */
 function finishLoad(root: THREE.Object3D, anims: THREE.AnimationClip[], name: string, ms: number) {
   fitModel(root);
-  scene!.add(root);
+  scene.value!.add(root);
   modelRoot = root;
   const firstClip = anims[0];
   if (firstClip) {
@@ -246,24 +200,11 @@ async function handleFileChange(e: Event) {
 
 /* ================= 清理 ================= */
 function clearModel() {
-  if (modelRoot && scene) scene.remove(modelRoot);
+  const s = scene.value;
+  if (modelRoot && s) s.remove(modelRoot);
   modelRoot = null;
   mixer = null;
   modelInfo.value = null;
-}
-
-function disposeScene() {
-  resizeObserver?.disconnect();
-  resizeObserver = null;
-  controls?.dispose();
-  controls = null;
-  renderer?.setAnimationLoop(null);
-  renderer?.dispose();
-  renderer?.domElement.remove();
-  clearModel();
-  renderer = null;
-  scene = null;
-  camera = null;
 }
 
 /* ================= 代码与讲解（函数式动态生成） ================= */
@@ -327,15 +268,12 @@ function infoLine() {
   return `【当前】${info.name}｜顶点 ${info.vertices}｜三角面 ${info.triangles}｜动画 ${info.animations} 段｜耗时 ${info.ms}ms`;
 }
 
-const code = computed(() => highlightCode(codeMap[activeFeature.value]()));
-const explanation = computed(() => explainMap[activeFeature.value]());
+const { code, explanation } = useCodeExplain(codeMap, explainMap, activeFeature);
 
-/* ================= 生命周期 ================= */
+/* ================= 初始加载 ================= */
 onMounted(() => {
-  initScene();
   loadModel('glb');
 });
-onBeforeUnmount(disposeScene);
 </script>
 
 <template>
@@ -375,24 +313,7 @@ onBeforeUnmount(disposeScene);
         class="relative min-w-0 flex-1 overflow-hidden rounded-lg border border-gray-200 shadow-sm"
       ></div>
 
-      <div
-        class="flex w-[420px] shrink-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
-      >
-        <div
-          class="border-b border-l-[3px] border-l-solid border-l-green-500 border-gray-100 py-2 pl-3 pr-4 text-sm font-semibold text-gray-600"
-        >
-          {{ activeFeature }} · 示例代码
-        </div>
-        <pre
-          class="m-0 flex-1 overflow-auto bg-gray-50 p-4 text-[13px] leading-relaxed"
-        ><code v-html="code"></code></pre>
-        <div
-          class="max-h-[46%] overflow-auto border-t border-gray-100 px-4 py-3 text-[13px] leading-relaxed text-gray-600"
-        >
-          <div class="mb-1 text-xs font-semibold text-gray-400">原理讲解</div>
-          <div class="whitespace-pre-wrap">{{ explanation }}</div>
-        </div>
-      </div>
+      <CodePanel :title="activeFeature" :code="code" :explanation="explanation" />
     </div>
 
     <!-- 加载进度条（屏幕正中间，宽度 400px） -->
@@ -412,27 +333,3 @@ onBeforeUnmount(disposeScene);
     </div>
   </div>
 </template>
-
-<style scoped>
-:deep(.c-code-comment) {
-  color: #9ca3af;
-  font-style: italic;
-}
-:deep(.c-code-string) {
-  color: #d97706;
-}
-:deep(.c-code-num) {
-  color: #2563eb;
-}
-:deep(.c-code-keyword) {
-  color: #7c3aed;
-  font-weight: 600;
-}
-:deep(.c-code-class) {
-  color: #0891b2;
-}
-:deep(.c-code-camera) {
-  color: #db2777;
-  font-weight: 600;
-}
-</style>

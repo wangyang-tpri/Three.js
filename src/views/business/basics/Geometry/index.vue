@@ -1,16 +1,11 @@
 <script setup lang="ts">
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { highlightCode } from '../../../utils/codeHighlight';
+import { onMounted, ref } from 'vue';
+import { useThreeScene } from '@/hooks/useThreeScene';
+import { useCodeExplain } from '@/hooks/useCodeExplain';
+import CodePanel from '@/components/base/CodePanel.vue';
 
 const containerRef = ref<HTMLDivElement | null>(null);
-
-let renderer: THREE.WebGLRenderer | null = null;
-let scene: THREE.Scene | null = null;
-let camera: THREE.PerspectiveCamera | null = null;
-let controls: OrbitControls | null = null;
-let resizeObserver: ResizeObserver | null = null;
 
 // 当前展示的几何体（复用同一个 mesh，仅更换 geometry）
 let currentMesh: THREE.Mesh | null = null;
@@ -18,6 +13,22 @@ let currentMaterial: THREE.MeshStandardMaterial | null = null;
 let currentGeometry: THREE.BufferGeometry | null = null;
 
 const activeShape = ref('box');
+
+const { scene } = useThreeScene(containerRef, {
+  background: 0xf5f7fa,
+  camera: { fov: 55, near: 0.1, far: 100, position: [3, 2, 5], lookAt: [0, 0.5, 0] },
+  controls: { target: [0, 0.5, 0] },
+  grid: { size: 6, divisions: 12 },
+  axes: 2,
+  lights: { ambient: 0.6, directional: 1, dirPosition: [5, 10, 7] },
+  onDispose: () => {
+    currentGeometry?.dispose();
+    currentMaterial?.dispose();
+    currentMesh = null;
+    currentGeometry = null;
+    currentMaterial = null;
+  },
+});
 
 /* ================= 几何体工厂 ================= */
 const SHAPES: Record<string, { label: string; make: () => THREE.BufferGeometry }> = {
@@ -31,40 +42,10 @@ const SHAPES: Record<string, { label: string; make: () => THREE.BufferGeometry }
   plane: { label: '平面', make: () => new THREE.PlaneGeometry(1.6, 1.6) },
 };
 
-/* ================= 场景初始化 ================= */
-function initScene() {
-  const container = containerRef.value;
-  if (!container || container.clientWidth === 0 || container.clientHeight === 0) return;
-
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xf5f7fa);
-
-  camera = new THREE.PerspectiveCamera(
-    55,
-    container.clientWidth / container.clientHeight,
-    0.1,
-    100
-  );
-  camera.position.set(3, 2, 5);
-  camera.lookAt(0, 0.5, 0);
-
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(container.clientWidth, container.clientHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  container.appendChild(renderer.domElement);
-
-  controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.target.set(0, 0.5, 0);
-  controls.update();
-
-  const axesHelper = new THREE.AxesHelper(2);
-  scene.add(axesHelper);
-
-  // 地面网格（便于观察几何体摆放）
-  const grid = new THREE.GridHelper(6, 12, 0xcbd5e1, 0xe2e8f0);
-  grid.position.y = 0;
-  scene.add(grid);
+/* ================= 场景内容（hook 已初始化，此处创建初始几何体） ================= */
+onMounted(() => {
+  const s = scene.value;
+  if (!s) return;
 
   // 通用材质：双面可见（平面旋转后也能从背面看到）
   currentMaterial = new THREE.MeshStandardMaterial({
@@ -77,30 +58,8 @@ function initScene() {
   currentGeometry = SHAPES.box!.make();
   currentMesh = new THREE.Mesh(currentGeometry, currentMaterial);
   currentMesh.position.y = 0.5;
-  scene.add(currentMesh);
-
-  // 灯光
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const dir = new THREE.DirectionalLight(0xffffff, 1);
-  dir.position.set(5, 10, 7);
-  scene.add(dir);
-
-  renderer.setAnimationLoop(() => {
-    controls?.update();
-    renderer?.render(scene!, camera!);
-  });
-
-  resizeObserver = new ResizeObserver(() => {
-    if (!container || !camera || !renderer) return;
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-    if (width === 0 || height === 0) return;
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
-    renderer.setSize(width, height);
-  });
-  resizeObserver.observe(container);
-}
+  s.add(currentMesh);
+});
 
 /* ================= 切换几何体 ================= */
 function applyShape(key: string) {
@@ -113,24 +72,6 @@ function applyShape(key: string) {
   // 平面平放，其余竖放
   currentMesh.rotation.x = key === 'plane' ? -Math.PI / 2 : 0;
   currentMesh.position.y = key === 'plane' ? 0 : 0.5;
-}
-
-function disposeScene() {
-  resizeObserver?.disconnect();
-  resizeObserver = null;
-  controls?.dispose();
-  controls = null;
-  renderer?.setAnimationLoop(null);
-  renderer?.dispose();
-  renderer?.domElement.remove();
-  currentGeometry?.dispose();
-  currentMaterial?.dispose();
-  renderer = null;
-  scene = null;
-  camera = null;
-  currentMesh = null;
-  currentGeometry = null;
-  currentMaterial = null;
 }
 
 /* ================= 代码与讲解（函数式动态生成） ================= */
@@ -195,15 +136,7 @@ const explainMap: Record<string, () => string> = {
     `【原理】只有 x/y 两个方向的 2D 面片，没有厚度。\n【参数】width / height：宽高；分段数可选。\n【要点】默认单面可见，材质要设 side: DoubleSide；常旋转 -90° 水平放置当地面 / 墙。`,
 };
 
-const code = computed(() => {
-  const fn = codeMap[activeShape.value];
-  return fn ? highlightCode(fn()) : '';
-});
-const explanation = computed(() => explainMap[activeShape.value]?.() ?? '');
-
-/* ================= 生命周期 ================= */
-onMounted(initScene);
-onBeforeUnmount(disposeScene);
+const { code, explanation } = useCodeExplain(codeMap, explainMap, activeShape);
 </script>
 
 <template>
@@ -227,48 +160,7 @@ onBeforeUnmount(disposeScene);
         class="relative min-w-0 flex-1 overflow-hidden rounded-lg border border-gray-200 shadow-sm"
       ></div>
 
-      <div
-        class="flex w-[420px] shrink-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
-      >
-        <div
-          class="border-b border-l-[3px] border-l-solid border-l-green-500 border-gray-100 py-2 pl-3 pr-4 text-sm font-semibold text-gray-600"
-        >
-          {{ activeShape }} · 示例代码
-        </div>
-        <pre
-          class="m-0 flex-1 overflow-auto bg-gray-50 p-4 text-[13px] leading-relaxed"
-        ><code v-html="code"></code></pre>
-        <div
-          class="max-h-[46%] overflow-auto border-t border-gray-100 px-4 py-3 text-[13px] leading-relaxed text-gray-600"
-        >
-          <div class="mb-1 text-xs font-semibold text-gray-400">原理讲解</div>
-          <div v-html="explanation" class="whitespace-pre-wrap"></div>
-        </div>
-      </div>
+      <CodePanel :title="activeShape" :code="code" :explanation="explanation" />
     </div>
   </div>
 </template>
-
-<style scoped>
-:deep(.c-code-comment) {
-  color: #9ca3af;
-  font-style: italic;
-}
-:deep(.c-code-string) {
-  color: #d97706;
-}
-:deep(.c-code-num) {
-  color: #2563eb;
-}
-:deep(.c-code-keyword) {
-  color: #7c3aed;
-  font-weight: 600;
-}
-:deep(.c-code-class) {
-  color: #0891b2;
-}
-:deep(.c-code-camera) {
-  color: #db2777;
-  font-weight: 600;
-}
-</style>

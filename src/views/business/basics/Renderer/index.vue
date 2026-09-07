@@ -1,23 +1,18 @@
 <script setup lang="ts">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { highlightCode } from '../../../utils/codeHighlight';
+import { computed, onMounted, ref } from 'vue';
+import { useThreeScene } from '@/hooks/useThreeScene';
+import { useCodeExplain } from '@/hooks/useCodeExplain';
+import CodePanel from '@/components/base/CodePanel.vue';
 
 /* ================= 状态 ================= */
 const containerRef = ref<HTMLDivElement | null>(null);
-
-let renderer: THREE.WebGLRenderer | null = null;
-let scene: THREE.Scene | null = null;
-let camera: THREE.PerspectiveCamera | null = null;
-let controls: OrbitControls | null = null;
-let resizeObserver: ResizeObserver | null = null;
 
 // 场景物体
 let ball: THREE.Mesh | null = null;
 let cube: THREE.Mesh | null = null;
 let ground: THREE.Mesh | null = null;
-let dirLight: THREE.DirectionalLight | null = null;
 
 // 各功能子状态
 const activeFeature = ref('renderer'); // 当前展示的功能
@@ -33,12 +28,30 @@ const BG_COLORS = [0xf5f7fa, 0x1e293b, 0xcfe8ff];
 const BG_LABELS = ['浅灰', '深色', '浅蓝'];
 const PIXEL_LABELS = ['1x（低清）', '2x（高清）'];
 
+const { scene, camera, renderer, controls } = useThreeScene(containerRef, {
+  background: BG_COLORS[0],
+  camera: { fov: 50, near: 0.1, far: 100, position: [5, 4, 6], lookAt: [0, 1, 0] },
+  controls: { target: [0, 1, 0] },
+  grid: false,
+  axes: 2,
+  lights: { ambient: 0.45, directional: 1.2, dirPosition: [5, 8, 4] },
+  shadow: { enabled: true, mapSize: 1024, cameraBounds: 10 },
+  loop: false, // 渲染器页演示渲染循环，由页面自行控制
+  onDispose: () => {
+    ball = null;
+    cube = null;
+    ground = null;
+  },
+});
+
 /* ================= 渲染器创建（可重建） ================= */
 function createRenderer(antialias: boolean) {
   const container = containerRef.value;
-  if (!container || !scene || !camera) return;
+  const s = scene.value;
+  const cam = camera.value;
+  if (!container || !s || !cam) return;
 
-  const old = renderer;
+  const old = renderer.value;
   const newRenderer = new THREE.WebGLRenderer({ antialias });
   newRenderer.setSize(container.clientWidth, container.clientHeight);
   newRenderer.setPixelRatio(pixelIndex.value === 0 ? 1 : 2);
@@ -51,14 +64,14 @@ function createRenderer(antialias: boolean) {
   } else {
     container.appendChild(newRenderer.domElement);
   }
-  renderer = newRenderer;
+  renderer.value = newRenderer;
 
   // 重建轨道控制器（它绑定在渲染器 canvas 上）
-  controls?.dispose();
-  controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.target.set(0, 1, 0);
-  controls.update();
+  controls.value?.dispose();
+  controls.value = new OrbitControls(cam, newRenderer.domElement);
+  controls.value.enableDamping = true;
+  controls.value.target.set(0, 1, 0);
+  controls.value.update();
 
   // 渲染循环
   startLoop();
@@ -66,41 +79,30 @@ function createRenderer(antialias: boolean) {
 
 /** 动态逐帧渲染（物体旋转） */
 function startLoop() {
-  if (!renderer) return;
-  renderer.setAnimationLoop(() => {
+  const rdr = renderer.value;
+  if (!rdr) return;
+  rdr.setAnimationLoop(() => {
     if (loopIndex.value === 0) {
       if (ball) ball.rotation.y += 0.012;
       if (cube) cube.rotation.y += 0.012;
     }
-    controls?.update();
-    renderer?.render(scene!, camera!);
+    controls.value?.update();
+    rdr.render(scene.value!, camera.value!);
   });
 }
 
 /** 静态单帧渲染（只在需要时手动渲染一次） */
 function renderOnce() {
-  if (!renderer) return;
-  renderer.render(scene!, camera!);
+  const rdr = renderer.value;
+  if (!rdr) return;
+  rdr.render(scene.value!, camera.value!);
 }
 
-/* ================= 场景初始化 ================= */
-function initScene() {
-  const container = containerRef.value;
-  if (!container || container.clientWidth === 0 || container.clientHeight === 0) return;
+/* ================= 场景内容（hook 已初始化，此处添加演示物体） ================= */
+onMounted(() => {
+  const s = scene.value;
+  if (!s) return;
 
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(BG_COLORS[bgIndex.value]!);
-
-  camera = new THREE.PerspectiveCamera(
-    50,
-    container.clientWidth / container.clientHeight,
-    0.1,
-    100
-  );
-  camera.position.set(5, 4, 6);
-  camera.lookAt(0, 1, 0);
-
-  // ---- 场景内容：便于演示阴影/抗锯齿 ----
   // 地面（接收阴影）
   ground = new THREE.Mesh(
     new THREE.PlaneGeometry(10, 10),
@@ -108,7 +110,7 @@ function initScene() {
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
-  scene.add(ground);
+  s.add(ground);
 
   // 蓝色球体（投射阴影，曲面边缘用于展示抗锯齿）
   ball = new THREE.Mesh(
@@ -117,7 +119,7 @@ function initScene() {
   );
   ball.position.set(0, 1.2, 0);
   ball.castShadow = true;
-  scene.add(ball);
+  s.add(ball);
 
   // 橙色立方体（投射阴影）
   cube = new THREE.Mesh(
@@ -126,21 +128,10 @@ function initScene() {
   );
   cube.position.set(2.2, 0.6, 0);
   cube.castShadow = true;
-  scene.add(cube);
-
-  // 灯光
-  scene.add(new THREE.AmbientLight(0xffffff, 0.45));
-  dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-  dirLight.position.set(5, 8, 4);
-  dirLight.castShadow = true;
-  scene.add(dirLight);
-
-  // 坐标轴
-  const axes = new THREE.AxesHelper(2);
-  scene.add(axes);
+  s.add(cube);
 
   createRenderer(true); // 默认抗锯齿开
-}
+});
 
 /* ================= 各功能按钮 ================= */
 
@@ -161,8 +152,9 @@ function applyAA() {
 function applyShadow() {
   shadowOn.value = !shadowOn.value;
   activeFeature.value = 'shadow';
-  if (!renderer) return;
-  renderer.shadowMap.enabled = shadowOn.value;
+  const rdr = renderer.value;
+  if (!rdr) return;
+  rdr.shadowMap.enabled = shadowOn.value;
   if (loopIndex.value === 1) renderOnce();
 }
 
@@ -172,7 +164,7 @@ function applyLoop() {
   activeFeature.value = 'loop';
   if (loopIndex.value === 1) {
     // 静态：停止动画循环，只渲染一帧
-    renderer?.setAnimationLoop(null);
+    renderer.value?.setAnimationLoop(null);
     renderOnce();
   } else {
     startLoop();
@@ -183,7 +175,8 @@ function applyLoop() {
 function applyBg() {
   bgIndex.value = (bgIndex.value + 1) % BG_LABELS.length;
   activeFeature.value = 'bg';
-  if (scene) scene.background = new THREE.Color(BG_COLORS[bgIndex.value]!);
+  const s = scene.value;
+  if (s) s.background = new THREE.Color(BG_COLORS[bgIndex.value]!);
   if (loopIndex.value === 1) renderOnce();
 }
 
@@ -191,8 +184,9 @@ function applyBg() {
 function applyPixel() {
   pixelIndex.value = pixelIndex.value === 0 ? 1 : 0;
   activeFeature.value = 'pixel';
-  if (!renderer) return;
-  renderer.setPixelRatio(pixelIndex.value === 0 ? 1 : 2);
+  const rdr = renderer.value;
+  if (!rdr) return;
+  rdr.setPixelRatio(pixelIndex.value === 0 ? 1 : 2);
   if (loopIndex.value === 1) renderOnce();
 }
 
@@ -205,8 +199,10 @@ function applyReset() {
   pixelIndex.value = 0;
   activeFeature.value = 'renderer';
   createRenderer(true);
-  if (scene) scene.background = new THREE.Color(BG_COLORS[0]!);
-  if (renderer) renderer.shadowMap.enabled = true;
+  const s = scene.value;
+  if (s) s.background = new THREE.Color(BG_COLORS[0]!);
+  const rdr = renderer.value;
+  if (rdr) rdr.shadowMap.enabled = true;
   startLoop();
 }
 
@@ -318,29 +314,7 @@ const loopLabel = computed(() => LOOP_LABELS[loopIndex.value]!);
 const bgLabel = computed(() => BG_LABELS[bgIndex.value]!);
 const pixelLabel = computed(() => PIXEL_LABELS[pixelIndex.value]!);
 
-const code = computed(() => {
-  const fn = codeMap[activeFeature.value];
-  return fn ? highlightCode(fn()) : '';
-});
-const explanation = computed(() => explainMap[activeFeature.value]?.() ?? '');
-
-/* ================= 生命周期 ================= */
-onMounted(initScene);
-onBeforeUnmount(() => {
-  resizeObserver?.disconnect();
-  resizeObserver = null;
-  controls?.dispose();
-  controls = null;
-  renderer?.setAnimationLoop(null);
-  renderer?.dispose();
-  renderer?.domElement.remove();
-  scene = null;
-  camera = null;
-  ball = null;
-  cube = null;
-  ground = null;
-  dirLight = null;
-});
+const { code, explanation } = useCodeExplain(codeMap, explainMap, activeFeature);
 </script>
 
 <template>
@@ -387,48 +361,7 @@ onBeforeUnmount(() => {
         class="relative min-w-0 flex-1 overflow-hidden rounded-lg border border-gray-200 shadow-sm"
       ></div>
 
-      <div
-        class="flex w-[420px] shrink-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
-      >
-        <div
-          class="border-b border-l-[3px] border-l-solid border-l-green-500 border-gray-100 py-2 pl-3 pr-4 text-sm font-semibold text-gray-600"
-        >
-          {{ activeFeature }} · 示例代码
-        </div>
-        <pre
-          class="m-0 flex-1 overflow-auto bg-gray-50 p-4 text-[13px] leading-relaxed"
-        ><code v-html="code"></code></pre>
-        <div
-          class="max-h-[46%] overflow-auto border-t border-gray-100 px-4 py-3 text-[13px] leading-relaxed text-gray-600"
-        >
-          <div class="mb-1 text-xs font-semibold text-gray-400">原理讲解</div>
-          <div v-html="explanation" class="whitespace-pre-wrap"></div>
-        </div>
-      </div>
+      <CodePanel :title="activeFeature" :code="code" :explanation="explanation" />
     </div>
   </div>
 </template>
-
-<style scoped>
-:deep(.c-code-comment) {
-  color: #9ca3af;
-  font-style: italic;
-}
-:deep(.c-code-string) {
-  color: #d97706;
-}
-:deep(.c-code-num) {
-  color: #2563eb;
-}
-:deep(.c-code-keyword) {
-  color: #7c3aed;
-  font-weight: 600;
-}
-:deep(.c-code-class) {
-  color: #0891b2;
-}
-:deep(.c-code-camera) {
-  color: #db2777;
-  font-weight: 600;
-}
-</style>

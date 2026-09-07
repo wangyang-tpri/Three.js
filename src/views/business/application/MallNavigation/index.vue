@@ -1,16 +1,12 @@
 <script setup lang="ts">
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { highlightCode } from '../../../utils/codeHighlight';
+import { useThreeScene } from '@/hooks/useThreeScene';
+import { useCodeExplain } from '@/hooks/useCodeExplain';
+import CodePanel from '@/components/base/CodePanel.vue';
 
 const containerRef = ref<HTMLDivElement | null>(null);
 
-let renderer: THREE.WebGLRenderer | null = null;
-let scene: THREE.Scene | null = null;
-let camera: THREE.PerspectiveCamera | null = null;
-let controls: OrbitControls | null = null;
-let resizeObserver: ResizeObserver | null = null;
 let mallGroup: THREE.Object3D | null = null;
 
 type FloorKey = 'all' | '1F' | '2F' | '3F';
@@ -28,6 +24,22 @@ let explodeProgress = 0;
 let explodeTarget = 0;
 let explodeRaf = 0;
 const EXPLODE_GAP = 2.8;
+
+const { scene, camera, controls } = useThreeScene(containerRef, {
+  background: 0xf5f7fa,
+  camera: { fov: 55, near: 0.1, far: 1000, position: [18, 16, 22] },
+  controls: { target: [0, 4.5, 0] },
+  grid: { size: 30, divisions: 30 },
+  axes: false,
+  lights: { ambient: 0.65, directional: 1.1, dirPosition: [15, 25, 12] },
+  shadow: { enabled: true, mapSize: 2048, cameraBounds: 25 },
+  onDispose: () => {
+    if (explodeRaf) cancelAnimationFrame(explodeRaf);
+    explodeRaf = 0;
+    floorRefs = [];
+    mallGroup = null;
+  },
+});
 
 type Wall = [[number, number], [number, number]];
 
@@ -233,62 +245,6 @@ const FLOORS: FloorData[] = [
 
 const FLOOR_HEIGHT = 3;
 
-/* ================= 场景初始化 ================= */
-function initScene() {
-  const container = containerRef.value;
-  if (!container || container.clientWidth === 0 || container.clientHeight === 0) return;
-
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xf5f7fa);
-
-  camera = new THREE.PerspectiveCamera(
-    55,
-    container.clientWidth / container.clientHeight,
-    0.1,
-    1000
-  );
-  camera.position.set(18, 16, 22);
-
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(container.clientWidth, container.clientHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
-  container.appendChild(renderer.domElement);
-
-  controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.target.set(0, 4.5, 0);
-  controls.update();
-
-  scene.add(new THREE.GridHelper(30, 30, 0xcbd5e1, 0xe2e8f0));
-  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
-  const dir = new THREE.DirectionalLight(0xffffff, 1.1);
-  dir.position.set(15, 25, 12);
-  dir.castShadow = true;
-  dir.shadow.mapSize.set(2048, 2048);
-  dir.shadow.camera.left = -25;
-  dir.shadow.camera.right = 25;
-  dir.shadow.camera.top = 25;
-  dir.shadow.camera.bottom = -25;
-  scene.add(dir);
-
-  renderer.setAnimationLoop(() => {
-    controls?.update();
-    renderer?.render(scene!, camera!);
-  });
-
-  resizeObserver = new ResizeObserver(() => {
-    if (!container || !camera || !renderer) return;
-    const w = container.clientWidth,
-      h = container.clientHeight;
-    if (w === 0 || h === 0) return;
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-    renderer.setSize(w, h);
-  });
-  resizeObserver.observe(container);
-}
-
 /* ================= 构建商场三维场景 ================= */
 function buildMall(floorKey: FloorKey) {
   clearMall();
@@ -355,26 +311,29 @@ function buildMall(floorKey: FloorKey) {
   }
 
   mallGroup = group;
-  scene!.add(group);
+  scene.value!.add(group);
   fitCamera(floorKey);
 }
 
 function fitCamera(floorKey: FloorKey) {
-  if (!camera || !controls) return;
+  const cam = camera.value;
+  const ctl = controls.value;
+  if (!cam || !ctl) return;
   if (floorKey === 'all') {
-    camera.position.set(20, 18, 24);
-    controls.target.set(0, 4.5, 0);
+    cam.position.set(20, 18, 24);
+    ctl.target.set(0, 4.5, 0);
   } else {
     const idx = FLOORS.findIndex((f) => f.name === floorKey);
     const yCenter = idx * FLOOR_HEIGHT + FLOOR_HEIGHT / 2;
-    camera.position.set(15, 11, 17);
-    controls.target.set(0, yCenter, 0);
+    cam.position.set(15, 11, 17);
+    ctl.target.set(0, yCenter, 0);
   }
-  controls.update();
+  ctl.update();
 }
 
 function clearMall() {
-  if (mallGroup && scene) scene.remove(mallGroup);
+  const s = scene.value;
+  if (mallGroup && s) s.remove(mallGroup);
   mallGroup = null;
 }
 
@@ -487,27 +446,18 @@ const explainMap: Record<FloorKey, () => string> = {
     `【原理】楼层抽取：只构建 3F 对象，Y 偏移 = 2×3m，其他楼层从场景中移除。\n【3F 布局】北侧三个影厅（大房间）+ 南侧娱乐区（游戏/游乐），分区明确。\n【相机】适配到三层中心（y=7.5）。\n【当前】仅显示 3F（三层 · 影院娱乐）。`,
 };
 
-const code = computed(() => highlightCode(codeMap[activeFloor.value]()));
-const explanation = computed(() => explainMap[activeFloor.value]());
+const panelTitle = computed(() => (activeFloor.value === 'all' ? '全部楼层' : activeFloor.value));
+
+const { code, explanation } = useCodeExplain(codeMap, explainMap, activeFloor);
 
 /* ================= 生命周期 ================= */
 onMounted(() => {
-  initScene();
   buildMall('all');
 });
 onBeforeUnmount(() => {
   if (explodeRaf) cancelAnimationFrame(explodeRaf);
-  resizeObserver?.disconnect();
-  resizeObserver = null;
-  controls?.disconnect();
-  controls = null;
-  renderer?.setAnimationLoop(null);
-  renderer?.dispose();
-  renderer?.domElement.remove();
+  explodeRaf = 0;
   clearMall();
-  renderer = null;
-  scene = null;
-  camera = null;
 });
 </script>
 
@@ -549,48 +499,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div
-        class="flex w-[420px] shrink-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
-      >
-        <div
-          class="border-b border-l-[3px] border-l-solid border-l-green-500 border-gray-100 py-2 pl-3 pr-4 text-sm font-semibold text-gray-600"
-        >
-          {{ activeFloor === 'all' ? '全部楼层' : activeFloor }} · 示例代码
-        </div>
-        <pre
-          class="m-0 flex-1 overflow-auto bg-gray-50 p-4 text-[13px] leading-relaxed"
-        ><code v-html="code"></code></pre>
-        <div
-          class="max-h-[46%] overflow-auto border-t border-gray-100 px-4 py-3 text-[13px] leading-relaxed text-gray-600"
-        >
-          <div class="mb-1 text-xs font-semibold text-gray-400">原理讲解</div>
-          <div class="whitespace-pre-wrap">{{ explanation }}</div>
-        </div>
-      </div>
+      <CodePanel :title="panelTitle" :code="code" :explanation="explanation" />
     </div>
   </div>
 </template>
-
-<style scoped>
-:deep(.c-code-comment) {
-  color: #9ca3af;
-  font-style: italic;
-}
-:deep(.c-code-string) {
-  color: #d97706;
-}
-:deep(.c-code-num) {
-  color: #2563eb;
-}
-:deep(.c-code-keyword) {
-  color: #7c3aed;
-  font-weight: 600;
-}
-:deep(.c-code-class) {
-  color: #0891b2;
-}
-:deep(.c-code-camera) {
-  color: #db2777;
-  font-weight: 600;
-}
-</style>
